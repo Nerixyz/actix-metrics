@@ -19,8 +19,10 @@ struct Inner {
 }
 
 impl Metrics {
-    pub fn new(service: String) -> Self {
-        Self(Rc::new(Inner { service }))
+    pub fn new<T: std::fmt::Display>(service: T) -> Self {
+        Self(Rc::new(Inner {
+            service: service.to_string(),
+        }))
     }
     pub fn register_metrics() {
         metrics::register_histogram!(
