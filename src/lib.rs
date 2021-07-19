@@ -3,9 +3,8 @@ use actix_web::{
     dev::{Service, ServiceRequest, ServiceResponse, Transform},
     Error,
 };
-use futures::{future::Either, ready};
+use futures::ready;
 use std::{
-    collections::HashSet,
     future::Future,
     pin::Pin,
     rc::Rc,
@@ -16,24 +15,13 @@ use std::{
 pub struct Metrics(Rc<Inner>);
 
 struct Inner {
-    ignored: HashSet<String>,
+    service: String,
 }
 
 impl Metrics {
-    pub fn new() -> Self {
-        Self(Rc::new(Inner {
-            ignored: HashSet::new(),
-        }))
+    pub fn new(service: String) -> Self {
+        Self(Rc::new(Inner { service }))
     }
-
-    pub fn ignore<T: Into<String>>(mut self, path: T) -> Self {
-        Rc::get_mut(&mut self.0)
-            .unwrap()
-            .ignored
-            .insert(path.into());
-        self
-    }
-
     pub fn register_metrics() {
         metrics::register_histogram!(
             "http_request_duration",
@@ -75,22 +63,19 @@ where
 {
     type Response = ServiceResponse;
     type Error = Error;
-    type Future = Either<S::Future, MetricsResponse<S>>;
+    type Future = MetricsResponse<S>;
 
     fn poll_ready(&self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(ctx)
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        if self.inner.ignored.contains(req.path()) {
-            Either::Left(self.service.call(req))
-        } else {
-            let now = Instant::now();
+        let now = Instant::now();
 
-            Either::Right(MetricsResponse {
-                fut: self.service.call(req),
-                start: now,
-            })
+        MetricsResponse {
+            fut: self.service.call(req),
+            start: now,
+            service: Some(self.inner.service.clone()),
         }
     }
 }
@@ -103,6 +88,7 @@ where
     #[pin]
     fut: S::Future,
     start: Instant,
+    service: Option<String>,
 }
 
 impl<S> Future for MetricsResponse<S>
@@ -122,15 +108,16 @@ where
         let duration = Instant::now()
             .checked_duration_since(*this.start)
             .unwrap_or_else(|| Duration::from_secs(0));
+        let service = this.service.take().unwrap();
         metrics::histogram!(
             "http_request_duration",
             duration.as_millis() as f64,
-            "path" => res.request().path().to_owned(),
+            "service" => service.clone(),
             "status" => res.status().as_str().to_owned(),
             "method" => res.request().method().as_str().to_owned()
         );
         metrics::increment_counter!("http_requests",
-            "path" => res.request().path().to_owned(),
+            "service" => service,
             "status" => res.status().as_str().to_owned(),
             "method" => res.request().method().as_str().to_owned()
         );
