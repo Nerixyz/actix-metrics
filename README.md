@@ -1,3 +1,7 @@
+## Archived
+
+This repository is now maintained in [nerix-utils-rs](https://github.com/Nerixyz/nerix-utils-rs).
+
 # actix-metrics
 
 Exposes metrics about your server through the `metrics` crate.
